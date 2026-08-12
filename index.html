@@ -2758,6 +2758,65 @@ function fbListen() {
 }
 
 // ============================================================
+//  SYNCHRONISATION CROISÉE VERS MEPUA
+//  Même projet Firebase (gestion-c99df), collection "mepua_data",
+//  document "ge_etudiants" — c'est exactement là que Mepua range
+//  sa liste d'étudiants (clé localStorage "ge_etudiants").
+//  Dès qu'un élève est inscrit/modifié/supprimé côté comptable ici,
+//  on met à jour cette même liste pour que Mepua (et tous les
+//  écrans qui lisent geEtudiants dans ce fichier) soient à jour.
+// ============================================================
+function _mepuaEtudiantDepuisEleve(eleve, classeNom) {
+  return {
+    matricule: eleve.matricule || '',
+    nom: eleve.nom || '',
+    prenom: eleve.prenom || '',
+    sexe: eleve.sexe || '',
+    dob: eleve.dob || '',
+    lieu: eleve.lieu || '',
+    option: '',
+    classe: classeNom || '',
+    statut: 'Actif',
+    tuteur: eleve.parent || '',
+    telTuteur: eleve.tel || '',
+    photo: ''
+  };
+}
+
+function syncEleveVersMepua(eleve, classeNom) {
+  if (!fbReady || !fbDb) return;
+  const ref = fbDb.collection('mepua_data').doc('ge_etudiants');
+  const nouveau = _mepuaEtudiantDepuisEleve(eleve, classeNom);
+  ref.get().then(snap => {
+    let liste = [];
+    if (snap.exists && snap.data().value) {
+      try { liste = JSON.parse(snap.data().value); } catch (e) { liste = []; }
+    }
+    const idx = liste.findIndex(e => e.matricule && e.matricule === nouveau.matricule);
+    if (idx >= 0) liste[idx] = { ...liste[idx], ...nouveau };
+    else liste.push(nouveau);
+    return ref.set({ value: JSON.stringify(liste), _majLe: firebase.firestore.FieldValue.serverTimestamp() });
+  }).then(() => {
+    toast('Élève synchronisé vers Mepua ✓', 'success');
+  }).catch(err => {
+    console.warn('Synchro Mepua échouée :', err);
+  });
+}
+
+function supprimerEleveDeMepua(matricule) {
+  if (!fbReady || !fbDb || !matricule) return;
+  const ref = fbDb.collection('mepua_data').doc('ge_etudiants');
+  ref.get().then(snap => {
+    if (!snap.exists || !snap.data().value) return;
+    let liste = [];
+    try { liste = JSON.parse(snap.data().value); } catch (e) { return; }
+    const filtree = liste.filter(e => e.matricule !== matricule);
+    if (filtree.length === liste.length) return;
+    return ref.set({ value: JSON.stringify(filtree), _majLe: firebase.firestore.FieldValue.serverTimestamp() });
+  }).catch(err => console.warn('Suppression Mepua échouée :', err));
+}
+
+// ============================================================
 //  STORAGE
 // ============================================================
 function saveState(skipCloud) {
@@ -3091,6 +3150,8 @@ function saveEleve() {
   closeModal('eleveModal');
   renderAll();
   toast('Élève enregistré avec succès', 'success');
+  const clsNouv = state.classes.find(c => c.id === data.classeId);
+  syncEleveVersMepua(data, clsNouv ? clsNouv.nom : '');
 }
 
 function deleteEleve(id) {
@@ -3103,6 +3164,7 @@ function deleteEleve(id) {
     saveState();
     renderAll();
     toast('Élève supprimé', 'danger');
+    if (e && e.matricule) supprimerEleveDeMepua(e.matricule);
   });
 }
 
