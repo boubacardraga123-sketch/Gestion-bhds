@@ -2,8 +2,19 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Gestion Scolaire BHDS — v5.7</title>
+
+<!-- PWA : installation sur téléphone et PC -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1a3a5c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Gestion Scolaire">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -1093,7 +1104,7 @@ tbody tr:last-child { border-bottom: none; }
     <div class="form-group" style="text-align:left;margin-bottom:18px;">
       <label>Fonction</label>
       <select id="roleSelect" onchange="selectRole(this.value)" style="padding:11px 14px;border:1.5px solid var(--border);border-radius:9px;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text);background:var(--surface);outline:none;width:100%;cursor:pointer;">
-        <option value="directeur">🎓 Admin (Directeur / Proviseur / Directrice / Censeur)</option>
+        <option value="directeur">🎓 Admin (Directeur / Fondateur / Proviseur / Directrice / Censeur)</option>
         <option value="caissier">🧮 Comptable</option>
       </select>
     </div>
@@ -1136,9 +1147,10 @@ tbody tr:last-child { border-bottom: none; }
       <div class="val" id="hdrPerc">0%</div>
       <div class="lbl">Payé</div>
     </div>
+    <button class="btn btn-ghost btn-sm no-print" id="btnInstallApp" onclick="installerApp()" title="Installer l'application" style="display:none;background:rgba(255,255,255,0.12);color:white;border-color:rgba(255,255,255,0.25);">⬇️ Installer</button>
     <button class="btn btn-ghost btn-sm no-print" onclick="openQuickSearch()" title="Recherche rapide (Ctrl+K)" style="background:rgba(255,255,255,0.12);color:white;border-color:rgba(255,255,255,0.25);">🔍 Recherche rapide</button>
     <button class="btn btn-accent btn-sm no-print" onclick="openParamModal()">⚙️ Paramètres</button>
-    <button class="btn btn-ghost btn-sm no-print" onclick="ouvrirChangeMDP()" title="Changer mon mot de passe" style="background:rgba(255,255,255,0.12);color:white;border-color:rgba(255,255,255,0.25);">🔑 MDP</button>
+    <button class="btn btn-ghost btn-sm no-print" id="btnMdpHeader" onclick="ouvrirChangeMDP()" title="Changer mon mot de passe" style="background:rgba(255,255,255,0.12);color:white;border-color:rgba(255,255,255,0.25);">🔑 MDP</button>
     <div class="user-badge no-print" id="userBadge" onclick="doLogout()">
       <span id="userIcon">🎓</span>
       <span id="userLabel">Directeur</span>
@@ -1203,6 +1215,9 @@ tbody tr:last-child { border-bottom: none; }
       <div class="nav-item" onclick="showPage('avances')">
         <span class="icon">💳</span> Avances salaires
       </div>
+    </div>
+    <div class="nav-section" id="navImpayesSection">
+      <div class="nav-label">Rappels</div>
       <div class="nav-item" onclick="showPage('impayes')">
         <span class="icon">🔔</span> Rappels impayés
       </div>
@@ -1996,6 +2011,7 @@ tbody tr:last-child { border-bottom: none; }
         <select id="auditFilterUser" onchange="renderAuditLog()" style="padding:10px 14px;border:1.5px solid var(--border);border-radius:9px;font-size:13px;background:#fff;outline:none;">
           <option value="">Tous les utilisateurs</option>
           <option value="Directeur">Directeur</option>
+          <option value="Fondateur">Fondateur</option>
           <option value="Comptable">Comptable</option>
           <option value="Proviseur">Proviseur</option>
           <option value="Directrice">Directrice</option>
@@ -2520,7 +2536,7 @@ tbody tr:last-child { border-bottom: none; }
     <div class="form-group" style="margin-bottom:14px;">
       <label>Rôle</label>
       <select id="cpRole" style="padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-size:14px;outline:none;width:100%;">
-        <option value="directeur">🎓 Directeur / Proviseur / Directrice / Senseur</option>
+        <option value="directeur">🎓 Directeur / Fondateur / Proviseur / Directrice / Senseur</option>
         <option value="caissier">💼 Caissier</option>
       </select>
     </div>
@@ -4789,13 +4805,13 @@ function ouvrirEleveDepuisRecherche(id) {
 let _selectedRole = 'directeur';
 
 // Rôles considérés comme "directeur" (accès complet)
-const ROLES_DIR = ['directeur','proviseur','directrice','senseur'];
+const ROLES_DIR = ['directeur','fondateur','proviseur','directrice','senseur'];
 const ROLE_LABELS = {
-  directeur: 'Directeur', proviseur: 'Proviseur',
+  directeur: 'Directeur', fondateur: 'Fondateur', proviseur: 'Proviseur',
   directrice: 'Directrice', senseur: 'Senseur', caissier: 'Comptable'
 };
 const ROLE_ICONS = {
-  directeur:'🎓', proviseur:'🎓', directrice:'🎓', senseur:'🎓', caissier:'🧮'
+  directeur:'🎓', fondateur:'🎓', proviseur:'🎓', directrice:'🎓', senseur:'🎓', caissier:'🧮'
 };
 
 function isDirecteurRole(role) { return ROLES_DIR.includes(role); }
@@ -4857,7 +4873,7 @@ function applyUserRights() {
   if (!currentUser) return;
   const isDir = isDirecteurRole(currentUser.role);
   // Le Comptable voit uniquement : Élèves, Classes, Paiements, Saisie rapide,
-  // Employés et Archive des reçus. L'Admin (Directeur/Proviseur/Directrice/Censeur)
+  // Employés et Archive des reçus. L'Admin (Directeur/Fondateur/Proviseur/Directrice/Censeur)
   // voit tout ce qui touche à l'argent (Tableau de bord, Dépenses, Journal de caisse,
   // Livre journal, Avances salaires, Impayés, Audit, Configuration).
   const idsAdminOnly = ['navDashboardSection', 'navDepensesSection', 'navOutilsSection', 'navSecuriteSection', 'navConfigSection'];
@@ -4872,6 +4888,9 @@ function applyUserRights() {
   if (depForm) depForm.style.display = isDir ? '' : 'none';
   const soldeNetCard = document.getElementById('soldeNetCard');
   if (soldeNetCard) soldeNetCard.style.display = isDir ? '' : 'none';
+  // Le Comptable ne doit pas voir l'onglet MDP (changement de mot de passe)
+  const btnMdpHeader = document.getElementById('btnMdpHeader');
+  if (btnMdpHeader) btnMdpHeader.style.display = isDir ? '' : 'none';
 }
 
 function sauvegarderMotDePasse() {
@@ -6213,7 +6232,7 @@ function logAudit(type, detail, montant, diff) {
   if (!state.auditLog) state.auditLog = [];
   const now = new Date();
   const role = currentUser ? currentUser.role : 'système';
-  const roleLabel = { directeur:'Directeur', proviseur:'Proviseur', directrice:'Directrice', senseur:'Senseur', caissier:'Comptable' }[role] || role;
+  const roleLabel = { directeur:'Directeur', fondateur:'Fondateur', proviseur:'Proviseur', directrice:'Directrice', senseur:'Senseur', caissier:'Comptable' }[role] || role;
   state.auditLog.unshift({
     id: 'aud' + Date.now(),
     ts: now.toISOString(),
@@ -6508,7 +6527,7 @@ function toggleVerrou(mois, verrouiller) {
   if (verrouiller) {
     if (!state.periodesVerrouillees.find(v => v.mois === mois)) {
       const label = new Date(mois + '-01').toLocaleDateString('fr-FR', {month:'long', year:'numeric'});
-      const par = currentUser ? ({ directeur:'Directeur', proviseur:'Proviseur', directrice:'Directrice', senseur:'Senseur', caissier:'Comptable' }[currentUser.role] || currentUser.role) : 'Système';
+      const par = currentUser ? ({ directeur:'Directeur', fondateur:'Fondateur', proviseur:'Proviseur', directrice:'Directrice', senseur:'Senseur', caissier:'Comptable' }[currentUser.role] || currentUser.role) : 'Système';
       state.periodesVerrouillees.push({ mois, date: new Date().toLocaleDateString('fr-FR'), par });
       logAudit('verrouillage', `Période verrouillée : ${label}`, null);
       toast('Période verrouillée ✓', 'success');
@@ -7716,6 +7735,42 @@ function exporterRapportCSV() {
   URL.revokeObjectURL(url);
   toast('Rapport exporté en CSV', 'success');
 }
+
+// ============================================================
+//  PWA — INSTALLATION SUR TÉLÉPHONE & PC
+// ============================================================
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+
+let _deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  _deferredInstallPrompt = e;
+  const btn = document.getElementById('btnInstallApp');
+  if (btn) btn.style.display = '';
+});
+
+function installerApp() {
+  if (_deferredInstallPrompt) {
+    _deferredInstallPrompt.prompt();
+    _deferredInstallPrompt.userChoice.finally(() => {
+      _deferredInstallPrompt = null;
+      const btn = document.getElementById('btnInstallApp');
+      if (btn) btn.style.display = 'none';
+    });
+  } else {
+    toast("Pour installer : menu du navigateur ➜ « Ajouter à l'écran d'accueil » (téléphone) ou « Installer l'application » (PC)", 'success');
+  }
+}
+
+window.addEventListener('appinstalled', () => {
+  const btn = document.getElementById('btnInstallApp');
+  if (btn) btn.style.display = 'none';
+  _deferredInstallPrompt = null;
+});
 </script>
 </body>
 </html>
