@@ -20,6 +20,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root {
   --primary: #1a3a5c;
@@ -1294,7 +1295,10 @@ tbody tr:last-child { border-bottom: none; }
             <option value="">Toutes les classes</option>
           </select>
         </div>
-        <button class="btn btn-primary" onclick="openEleveModal()">➕ Nouvel élève</button>
+        <div class="gap-8">
+          <button class="btn btn-ghost" onclick="openImportExcelModal()">📥 Importer Excel</button>
+          <button class="btn btn-primary" onclick="openEleveModal()">➕ Nouvel élève</button>
+        </div>
       </div>
 
       <div class="card" style="margin-top:18px;">
@@ -2223,6 +2227,55 @@ tbody tr:last-child { border-bottom: none; }
     <div class="gap-8">
       <button class="btn btn-primary" onclick="saveEleve()">💾 Enregistrer</button>
       <button class="btn btn-ghost" onclick="closeModal('eleveModal')">Annuler</button>
+    </div>
+  </div>
+</div>
+
+<!-- IMPORT EXCEL DES ELEVES -->
+<div class="modal-overlay" id="importExcelModal">
+  <div class="modal" style="max-width:820px;">
+    <div class="modal-header">
+      <div class="modal-title">📥 Importer des élèves depuis Excel</div>
+      <button class="modal-close" onclick="closeModal('importExcelModal')">✕</button>
+    </div>
+
+    <div id="importStep1">
+      <div style="font-size:13px; color:var(--text-muted); margin-bottom:14px; line-height:1.6;">
+        Le fichier Excel (.xlsx, .xls, .csv) doit contenir en première ligne les en-têtes de colonnes. Colonnes reconnues (l'ordre n'a pas d'importance, insensible à la casse) :<br>
+        <b>Nom, Prénom, Classe, Matricule, Date naissance, Sexe, Lieu naissance, Parent/Tuteur, Téléphone, Adresse, Observation</b><br>
+        Seules <b>Nom</b>, <b>Prénom</b> et <b>Classe</b> sont obligatoires. Si la classe indiquée n'existe pas encore, elle sera créée automatiquement.
+      </div>
+      <div class="form-group">
+        <label>Fichier Excel</label>
+        <input type="file" id="importExcelFile" accept=".xlsx,.xls,.csv" onchange="handleImportExcelFile(event)">
+      </div>
+      <div id="importExcelStatus" style="font-size:13px; color:var(--text-muted); margin-top:8px;"></div>
+    </div>
+
+    <div id="importStep2" style="display:none;">
+      <div style="font-size:13px; color:var(--text-muted); margin-bottom:10px;">
+        <span id="importSummary"></span>
+      </div>
+      <div style="max-height:340px; overflow:auto; border:1.5px solid var(--border); border-radius:9px;">
+        <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
+          <thead>
+            <tr style="background:var(--surface2); position:sticky; top:0;">
+              <th style="padding:8px 10px; text-align:left;">Nom</th>
+              <th style="padding:8px 10px; text-align:left;">Prénom</th>
+              <th style="padding:8px 10px; text-align:left;">Classe</th>
+              <th style="padding:8px 10px; text-align:left;">Matricule</th>
+              <th style="padding:8px 10px; text-align:left;">Parent</th>
+              <th style="padding:8px 10px; text-align:left;">Téléphone</th>
+              <th style="padding:8px 10px; text-align:left;">Statut</th>
+            </tr>
+          </thead>
+          <tbody id="importPreviewTable"></tbody>
+        </table>
+      </div>
+      <div class="gap-8" style="margin-top:16px;">
+        <button class="btn btn-primary" onclick="confirmerImportExcel()">✅ Importer les élèves valides</button>
+        <button class="btn btn-ghost" onclick="closeModal('importExcelModal')">Annuler</button>
+      </div>
     </div>
   </div>
 </div>
@@ -3179,6 +3232,158 @@ function gotoPayEleve(id) {
 function genMatricule() {
   const yr = new Date().getFullYear().toString().slice(-2);
   return 'EL' + yr + String(state.eleves.length + 1).padStart(4, '0');
+}
+
+// ============================================================
+//  IMPORT EXCEL DES ELEVES (synchronisation avec la gestion comptable)
+// ============================================================
+let importExcelData = [];
+
+function openImportExcelModal() {
+  importExcelData = [];
+  document.getElementById('importExcelFile').value = '';
+  document.getElementById('importExcelStatus').textContent = '';
+  document.getElementById('importStep1').style.display = '';
+  document.getElementById('importStep2').style.display = 'none';
+  document.getElementById('importExcelModal').classList.add('open');
+}
+
+function _normalizeHeader(h) {
+  return String(h || '').trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // enlève les accents
+    .replace(/[^a-z0-9]/g, '');
+}
+
+const IMPORT_HEADER_MAP = {
+  nom: 'nom',
+  prenom: 'prenom', 'prenoms': 'prenom',
+  classe: 'classe',
+  matricule: 'matricule',
+  datenaissance: 'dob', 'ddn': 'dob', naissance: 'dob',
+  sexe: 'sexe', genre: 'sexe',
+  lieunaissance: 'lieu', 'lieudenaissance': 'lieu', lieu: 'lieu',
+  parent: 'parent', tuteur: 'parent', 'parenttuteur': 'parent', 'nomduparenttuteur': 'parent',
+  telephone: 'tel', tel: 'tel', contact: 'tel',
+  adresse: 'adresse',
+  observation: 'note', note: 'note', remarque: 'note'
+};
+
+function _excelDateToStr(v) {
+  if (v == null || v === '') return '';
+  if (typeof v === 'number' && window.XLSX && XLSX.SSF) {
+    const d = XLSX.SSF.parse_date_code(v);
+    if (d) return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+  }
+  const s = String(v).trim();
+  const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (m) {
+    let [, dd, mm, yyyy] = m;
+    if (yyyy.length === 2) yyyy = '20' + yyyy;
+    return `${yyyy}-${dd.padStart(2,'0')}-${mm.padStart(2,'0')}`;
+  }
+  return s;
+}
+
+function handleImportExcelFile(evt) {
+  const file = evt.target.files[0];
+  if (!file) return;
+  document.getElementById('importExcelStatus').textContent = 'Lecture du fichier…';
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: false });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      if (!rows.length) { document.getElementById('importExcelStatus').textContent = 'Fichier vide.'; return; }
+      const headers = rows[0].map(_normalizeHeader);
+      const dataRows = rows.slice(1).filter(r => r.some(c => String(c).trim() !== ''));
+      importExcelData = dataRows.map(r => {
+        const obj = {};
+        headers.forEach((h, i) => {
+          const key = IMPORT_HEADER_MAP[h];
+          if (key) obj[key] = r[i] != null ? String(r[i]).trim() : '';
+        });
+        if (obj.dob) obj.dob = _excelDateToStr(obj.dob);
+        return obj;
+      });
+      renderImportPreview();
+    } catch (err) {
+      document.getElementById('importExcelStatus').textContent = '❌ Erreur de lecture du fichier : ' + err.message;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function renderImportPreview() {
+  const existingMatricules = new Set(state.eleves.map(e => e.matricule));
+  let valid = 0, invalid = 0, nouvellesClasses = new Set();
+  const rowsHtml = importExcelData.map(r => {
+    const okBase = r.nom && r.prenom && r.classe;
+    let statut = '';
+    if (!okBase) {
+      invalid++;
+      statut = '<span style="color:var(--danger); font-weight:600;">⚠️ Nom/Prénom/Classe manquant</span>';
+    } else {
+      valid++;
+      const clsExiste = state.classes.find(c => c.nom.toLowerCase() === r.classe.toLowerCase());
+      if (!clsExiste) { nouvellesClasses.add(r.classe); statut = '<span style="color:var(--warning); font-weight:600;">➕ Nouvelle classe</span>'; }
+      else statut = '<span style="color:var(--success); font-weight:600;">✔️ Prêt</span>';
+      if (r.matricule && existingMatricules.has(r.matricule)) {
+        statut = '<span style="color:var(--warning); font-weight:600;">⚠️ Matricule déjà utilisé (sera régénéré)</span>';
+      }
+    }
+    return `<tr>
+      <td style="padding:6px 10px; border-bottom:1px solid var(--border);">${r.nom || '—'}</td>
+      <td style="padding:6px 10px; border-bottom:1px solid var(--border);">${r.prenom || '—'}</td>
+      <td style="padding:6px 10px; border-bottom:1px solid var(--border);">${r.classe || '—'}</td>
+      <td style="padding:6px 10px; border-bottom:1px solid var(--border);">${r.matricule || '(auto)'}</td>
+      <td style="padding:6px 10px; border-bottom:1px solid var(--border);">${r.parent || '—'}</td>
+      <td style="padding:6px 10px; border-bottom:1px solid var(--border);">${r.tel || '—'}</td>
+      <td style="padding:6px 10px; border-bottom:1px solid var(--border);">${statut}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('importPreviewTable').innerHTML = rowsHtml || '<tr><td colspan="7" style="padding:14px; text-align:center;">Aucune ligne trouvée.</td></tr>';
+  document.getElementById('importSummary').innerHTML =
+    `<b>${importExcelData.length}</b> ligne(s) lue(s) — <span style="color:var(--success);">${valid} valide(s)</span>, <span style="color:var(--danger);">${invalid} invalide(s)</span>${nouvellesClasses.size ? `, <span style="color:var(--warning);">${nouvellesClasses.size} nouvelle(s) classe(s) à créer</span>` : ''}.`;
+  document.getElementById('importStep1').style.display = 'none';
+  document.getElementById('importStep2').style.display = '';
+}
+
+function confirmerImportExcel() {
+  const existingMatricules = new Set(state.eleves.map(e => e.matricule));
+  let ajoutes = 0, ignores = 0;
+  importExcelData.forEach(r => {
+    if (!r.nom || !r.prenom || !r.classe) { ignores++; return; }
+
+    // Trouver ou créer la classe
+    let cls = state.classes.find(c => c.nom.toLowerCase() === r.classe.toLowerCase());
+    if (!cls) {
+      cls = { id: 'cls' + Date.now() + Math.floor(Math.random() * 1000), nom: r.classe, cycle: '', frais: 500000, effectif: 150 };
+      state.classes.push(cls);
+    }
+
+    // Matricule unique
+    let mat = r.matricule && !existingMatricules.has(r.matricule) ? r.matricule : genMatricule();
+    while (existingMatricules.has(mat)) mat = genMatricule();
+    existingMatricules.add(mat);
+
+    const data = {
+      id: 'e' + Date.now() + Math.floor(Math.random() * 1000),
+      nom: r.nom, prenom: r.prenom,
+      dob: r.dob || '', sexe: r.sexe || 'Masculin', lieu: r.lieu || '',
+      classeId: cls.id, matricule: mat,
+      parent: r.parent || '', tel: r.tel || '', adresse: r.adresse || '', note: r.note || ''
+    };
+    state.eleves.push(data);
+    logAudit('eleve', `Élève importé (Excel) : ${data.prenom} ${data.nom} (${mat})`, null);
+    syncEleveVersMepua(data, cls.nom);
+    ajoutes++;
+  });
+
+  saveState();
+  renderAll();
+  closeModal('importExcelModal');
+  toast(`${ajoutes} élève(s) importé(s) et synchronisé(s) avec la gestion comptable${ignores ? `, ${ignores} ligne(s) ignorée(s)` : ''}.`, 'success');
 }
 
 // ============================================================
