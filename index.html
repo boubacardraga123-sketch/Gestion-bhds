@@ -5556,6 +5556,7 @@ function exporterImpayesExcel() {
 
   const filtreLabel = filtreS === 'impaye' ? 'Impayé total' : filtreS === 'partiel' ? 'Paiement partiel' : 'Tous sauf soldés';
   const dateAujourd = new Date().toLocaleDateString('fr-FR');
+  const NB_COLS = 11; // Nb de colonnes réelles (12) - 1, pour MergeAcross
 
   // Construction du XML Excel (format SpreadsheetML / XMLSS — compatible Excel sans bibliothèque)
   const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -5563,32 +5564,35 @@ function exporterImpayesExcel() {
   let xmlRows = '';
 
   // ---- Ligne de titre ----
-  xmlRows += '<Row ss:Height="28">'
-    + '<Cell ss:MergeAcross="8" ss:StyleID="titre"><Data ss:Type="String">LISTE DES IMPAYÉS PAR CLASSE — ' + esc(state.school.nom) + ' — Année ' + esc(state.school.annee) + '</Data></Cell>'
+  xmlRows += '<Row ss:Height="30">'
+    + '<Cell ss:MergeAcross="' + NB_COLS + '" ss:StyleID="titre"><Data ss:Type="String">LISTE DES IMPAYÉS PAR CLASSE — ' + esc(state.school.nom) + ' — Année ' + esc(state.school.annee) + '</Data></Cell>'
     + '</Row>';
   xmlRows += '<Row ss:Height="18">'
-    + '<Cell ss:MergeAcross="8" ss:StyleID="soustitre"><Data ss:Type="String">Filtre : ' + esc(filtreLabel) + '   |   Édité le ' + esc(dateAujourd) + '</Data></Cell>'
+    + '<Cell ss:MergeAcross="' + NB_COLS + '" ss:StyleID="soustitre"><Data ss:Type="String">Filtre : ' + esc(filtreLabel) + '   |   Édité le ' + esc(dateAujourd) + '</Data></Cell>'
     + '</Row>';
-  xmlRows += '<Row ss:Height="8"><Cell><Data ss:Type="String"></Data></Cell></Row>';
+  xmlRows += '<Row ss:Height="10"><Cell><Data ss:Type="String"></Data></Cell></Row>';
 
   let grandTotalDu = 0, grandTotalPaye = 0, grandTotalRestant = 0, grandNb = 0;
 
   Object.values(groupes).forEach(({ cls, eleves }) => {
     // En-tête de classe
-    xmlRows += '<Row ss:Height="22">'
-      + '<Cell ss:MergeAcross="8" ss:StyleID="classeHeader"><Data ss:Type="String">🏫  ' + esc(cls.nom) + '  (' + esc(cls.cycle) + ')  —  ' + eleves.length + ' élève(s)</Data></Cell>'
+    xmlRows += '<Row ss:Height="24">'
+      + '<Cell ss:MergeAcross="' + NB_COLS + '" ss:StyleID="classeHeader"><Data ss:Type="String">🏫  Classe : ' + esc(cls.nom) + (cls.cycle ? '  (' + esc(cls.cycle) + ')' : '') + '  —  ' + eleves.length + ' élève(s)</Data></Cell>'
       + '</Row>';
 
     // En-têtes colonnes
-    xmlRows += '<Row ss:Height="18">'
-      + '<Cell ss:StyleID="colHeader"><Data ss:Type="String">#</Data></Cell>'
-      + '<Cell ss:StyleID="colHeader"><Data ss:Type="String">Nom &amp; Prénom</Data></Cell>'
+    xmlRows += '<Row ss:Height="30">'
+      + '<Cell ss:StyleID="colHeader"><Data ss:Type="String">N°</Data></Cell>'
+      + '<Cell ss:StyleID="colHeader"><Data ss:Type="String">Nom</Data></Cell>'
+      + '<Cell ss:StyleID="colHeader"><Data ss:Type="String">Prénom</Data></Cell>'
       + '<Cell ss:StyleID="colHeader"><Data ss:Type="String">Matricule</Data></Cell>'
+      + '<Cell ss:StyleID="colHeader"><Data ss:Type="String">Classe</Data></Cell>'
       + '<Cell ss:StyleID="colHeader"><Data ss:Type="String">Parent / Tuteur</Data></Cell>'
       + '<Cell ss:StyleID="colHeader"><Data ss:Type="String">Téléphone</Data></Cell>'
       + '<Cell ss:StyleID="colHeader"><Data ss:Type="String">Total dû (GNF)</Data></Cell>'
       + '<Cell ss:StyleID="colHeader"><Data ss:Type="String">Versé (GNF)</Data></Cell>'
       + '<Cell ss:StyleID="colHeader"><Data ss:Type="String">Restant (GNF)</Data></Cell>'
+      + '<Cell ss:StyleID="colHeader"><Data ss:Type="String">% Payé</Data></Cell>'
       + '<Cell ss:StyleID="colHeader"><Data ss:Type="String">Statut</Data></Cell>'
       + '</Row>';
 
@@ -5598,45 +5602,52 @@ function exporterImpayesExcel() {
       const totalDu = getMontantTranche('t1',cls.id)+getMontantTranche('t2',cls.id)+getMontantTranche('t3',cls.id);
       const totalPaye = getPaye(e.id,'t1')+getPaye(e.id,'t2')+getPaye(e.id,'t3')+getPayeLibre(e.id);
       const restant = Math.max(0, totalDu - totalPaye);
-      const statut = totalPaye === 0 ? 'Impayé' : totalPaye >= totalDu ? 'Soldé' : Math.round(totalPaye/totalDu*100) + '%';
+      const pct = totalDu > 0 ? Math.round(totalPaye/totalDu*100) : 0;
+      const statut = totalPaye === 0 ? 'Impayé' : totalPaye >= totalDu ? 'Soldé' : 'Partiel';
       clsTotalDu += totalDu; clsTotalPaye += totalPaye; clsTotalRestant += restant;
 
       const rowStyle = i % 2 === 0 ? 'dataRowEven' : 'dataRowOdd';
-      xmlRows += '<Row ss:Height="16">'
-        + '<Cell ss:StyleID="' + rowStyle + '"><Data ss:Type="Number">' + (i+1) + '</Data></Cell>'
-        + '<Cell ss:StyleID="' + rowStyle + '"><Data ss:Type="String">' + esc(e.prenom + ' ' + e.nom) + '</Data></Cell>'
+      const statutStyle = statut === 'Impayé' ? 'statutRouge' : statut === 'Soldé' ? 'statutVert' : 'statutOrange';
+      xmlRows += '<Row ss:Height="17">'
+        + '<Cell ss:StyleID="' + rowStyle + 'Num"><Data ss:Type="Number">' + (i+1) + '</Data></Cell>'
+        + '<Cell ss:StyleID="' + rowStyle + '"><Data ss:Type="String">' + esc(e.nom) + '</Data></Cell>'
+        + '<Cell ss:StyleID="' + rowStyle + '"><Data ss:Type="String">' + esc(e.prenom) + '</Data></Cell>'
         + '<Cell ss:StyleID="' + rowStyle + '"><Data ss:Type="String">' + esc(e.matricule||'') + '</Data></Cell>'
+        + '<Cell ss:StyleID="' + rowStyle + '"><Data ss:Type="String">' + esc(cls.nom) + '</Data></Cell>'
         + '<Cell ss:StyleID="' + rowStyle + '"><Data ss:Type="String">' + esc(e.parent||'') + '</Data></Cell>'
         + '<Cell ss:StyleID="' + rowStyle + '"><Data ss:Type="String">' + esc(e.tel||'') + '</Data></Cell>'
         + '<Cell ss:StyleID="numCell"><Data ss:Type="Number">' + totalDu + '</Data></Cell>'
         + '<Cell ss:StyleID="numGreen"><Data ss:Type="Number">' + totalPaye + '</Data></Cell>'
         + '<Cell ss:StyleID="numRed"><Data ss:Type="Number">' + restant + '</Data></Cell>'
-        + '<Cell ss:StyleID="' + rowStyle + '"><Data ss:Type="String">' + esc(statut) + '</Data></Cell>'
+        + '<Cell ss:StyleID="numCell"><Data ss:Type="Number">' + pct + '</Data></Cell>'
+        + '<Cell ss:StyleID="' + statutStyle + '"><Data ss:Type="String">' + esc(statut) + '</Data></Cell>'
         + '</Row>';
     });
 
     // Sous-total classe
     xmlRows += '<Row ss:Height="18">'
-      + '<Cell ss:MergeAcross="4" ss:StyleID="subTotal"><Data ss:Type="String">SOUS-TOTAL — ' + esc(cls.nom) + '</Data></Cell>'
+      + '<Cell ss:MergeAcross="6" ss:StyleID="subTotal"><Data ss:Type="String">SOUS-TOTAL — ' + esc(cls.nom) + '</Data></Cell>'
       + '<Cell ss:StyleID="subTotalNum"><Data ss:Type="Number">' + clsTotalDu + '</Data></Cell>'
       + '<Cell ss:StyleID="subTotalGreen"><Data ss:Type="Number">' + clsTotalPaye + '</Data></Cell>'
       + '<Cell ss:StyleID="subTotalRed"><Data ss:Type="Number">' + clsTotalRestant + '</Data></Cell>'
-      + '<Cell ss:StyleID="subTotal"><Data ss:Type="String"></Data></Cell>'
+      + '<Cell ss:MergeAcross="1" ss:StyleID="subTotal"><Data ss:Type="String">' + (clsTotalDu > 0 ? Math.round(clsTotalPaye/clsTotalDu*100) + '% recouvré' : '') + '</Data></Cell>'
       + '</Row>';
 
     grandTotalDu += clsTotalDu; grandTotalPaye += clsTotalPaye; grandTotalRestant += clsTotalRestant; grandNb += eleves.length;
 
-    xmlRows += '<Row ss:Height="8"><Cell><Data ss:Type="String"></Data></Cell></Row>';
+    xmlRows += '<Row ss:Height="10"><Cell><Data ss:Type="String"></Data></Cell></Row>';
   });
 
   // Grand total
-  xmlRows += '<Row ss:Height="22">'
-    + '<Cell ss:MergeAcross="4" ss:StyleID="grandTotal"><Data ss:Type="String">TOTAL GÉNÉRAL (' + grandNb + ' élèves — ' + Object.keys(groupes).length + ' classes)</Data></Cell>'
+  xmlRows += '<Row ss:Height="24">'
+    + '<Cell ss:MergeAcross="6" ss:StyleID="grandTotal"><Data ss:Type="String">TOTAL GÉNÉRAL (' + grandNb + ' élèves — ' + Object.keys(groupes).length + ' classes)</Data></Cell>'
     + '<Cell ss:StyleID="grandTotalNum"><Data ss:Type="Number">' + grandTotalDu + '</Data></Cell>'
     + '<Cell ss:StyleID="grandTotalGreen"><Data ss:Type="Number">' + grandTotalPaye + '</Data></Cell>'
     + '<Cell ss:StyleID="grandTotalRed"><Data ss:Type="Number">' + grandTotalRestant + '</Data></Cell>'
-    + '<Cell ss:StyleID="grandTotal"><Data ss:Type="String">' + (grandTotalDu > 0 ? Math.round(grandTotalPaye/grandTotalDu*100) + '% recouvré' : '') + '</Data></Cell>'
+    + '<Cell ss:MergeAcross="1" ss:StyleID="grandTotal"><Data ss:Type="String">' + (grandTotalDu > 0 ? Math.round(grandTotalPaye/grandTotalDu*100) + '% recouvré' : '') + '</Data></Cell>'
     + '</Row>';
+
+  const bordAll = '<Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#d0dce8"/><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#d0dce8"/><Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#d0dce8"/><Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#d0dce8"/></Borders>';
 
   const xml = '<?xml version="1.0" encoding="UTF-8"?>'
     + '<?mso-application progid="Excel.Sheet"?>'
@@ -5648,36 +5659,45 @@ function exporterImpayesExcel() {
     + '<Style ss:ID="titre"><Font ss:FontName="Arial" ss:Size="14" ss:Bold="1" ss:Color="#1a3a5c"/><Alignment ss:Horizontal="Center" ss:Vertical="Center"/></Style>'
     + '<Style ss:ID="soustitre"><Font ss:FontName="Arial" ss:Size="10" ss:Color="#5a6b7e" ss:Italic="1"/><Alignment ss:Horizontal="Center"/></Style>'
     + '<Style ss:ID="classeHeader"><Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#1a3a5c"/><Interior ss:Color="#dce6f0" ss:Pattern="Solid"/><Alignment ss:Vertical="Center"/><Borders><Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="3" ss:Color="#1a3a5c"/><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1a3a5c"/></Borders></Style>'
-    + '<Style ss:ID="colHeader"><Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#2d5986" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center" ss:Vertical="Center"/><Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1a3a5c"/></Borders></Style>'
-    + '<Style ss:ID="dataRowEven"><Font ss:FontName="Arial" ss:Size="10"/><Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/></Style>'
-    + '<Style ss:ID="dataRowOdd"><Font ss:FontName="Arial" ss:Size="10"/><Interior ss:Color="#f8fafc" ss:Pattern="Solid"/></Style>'
-    + '<Style ss:ID="numCell"><Font ss:FontName="Arial" ss:Size="10"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right"/></Style>'
-    + '<Style ss:ID="numGreen"><Font ss:FontName="Arial" ss:Size="10" ss:Color="#2e7d52" ss:Bold="1"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right"/></Style>'
-    + '<Style ss:ID="numRed"><Font ss:FontName="Arial" ss:Size="10" ss:Color="#c0392b" ss:Bold="1"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right"/></Style>'
-    + '<Style ss:ID="subTotal"><Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#1a3a5c"/><Interior ss:Color="#eef2f7" ss:Pattern="Solid"/><Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#1a3a5c"/></Borders></Style>'
-    + '<Style ss:ID="subTotalNum"><Font ss:FontName="Arial" ss:Size="10" ss:Bold="1"/><Interior ss:Color="#eef2f7" ss:Pattern="Solid"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right"/><Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#1a3a5c"/></Borders></Style>'
-    + '<Style ss:ID="subTotalGreen"><Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#2e7d52"/><Interior ss:Color="#eef2f7" ss:Pattern="Solid"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right"/><Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#1a3a5c"/></Borders></Style>'
-    + '<Style ss:ID="subTotalRed"><Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#c0392b"/><Interior ss:Color="#eef2f7" ss:Pattern="Solid"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right"/><Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#1a3a5c"/></Borders></Style>'
-    + '<Style ss:ID="grandTotal"><Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#1a3a5c" ss:Pattern="Solid"/><Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#e8a020"/></Borders></Style>'
-    + '<Style ss:ID="grandTotalNum"><Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#f5c35a"/><Interior ss:Color="#1a3a5c" ss:Pattern="Solid"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right"/><Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#e8a020"/></Borders></Style>'
-    + '<Style ss:ID="grandTotalGreen"><Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#6ee7b7"/><Interior ss:Color="#1a3a5c" ss:Pattern="Solid"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right"/><Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#e8a020"/></Borders></Style>'
-    + '<Style ss:ID="grandTotalRed"><Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#fca5a5"/><Interior ss:Color="#1a3a5c" ss:Pattern="Solid"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right"/><Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#e8a020"/></Borders></Style>'
+    + '<Style ss:ID="colHeader"><Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#2d5986" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>' + bordAll + '</Style>'
+    + '<Style ss:ID="dataRowEven"><Font ss:FontName="Arial" ss:Size="10"/><Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/><Alignment ss:Vertical="Center"/>' + bordAll + '</Style>'
+    + '<Style ss:ID="dataRowOdd"><Font ss:FontName="Arial" ss:Size="10"/><Interior ss:Color="#f8fafc" ss:Pattern="Solid"/><Alignment ss:Vertical="Center"/>' + bordAll + '</Style>'
+    + '<Style ss:ID="dataRowEvenNum"><Font ss:FontName="Arial" ss:Size="10"/><Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center" ss:Vertical="Center"/>' + bordAll + '</Style>'
+    + '<Style ss:ID="dataRowOddNum"><Font ss:FontName="Arial" ss:Size="10"/><Interior ss:Color="#f8fafc" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center" ss:Vertical="Center"/>' + bordAll + '</Style>'
+    + '<Style ss:ID="numCell"><Font ss:FontName="Arial" ss:Size="10"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right" ss:Vertical="Center"/>' + bordAll + '</Style>'
+    + '<Style ss:ID="numGreen"><Font ss:FontName="Arial" ss:Size="10" ss:Color="#2e7d52" ss:Bold="1"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right" ss:Vertical="Center"/>' + bordAll + '</Style>'
+    + '<Style ss:ID="numRed"><Font ss:FontName="Arial" ss:Size="10" ss:Color="#c0392b" ss:Bold="1"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right" ss:Vertical="Center"/>' + bordAll + '</Style>'
+    + '<Style ss:ID="statutRouge"><Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#c0392b" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center" ss:Vertical="Center"/>' + bordAll + '</Style>'
+    + '<Style ss:ID="statutOrange"><Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#e67e22" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center" ss:Vertical="Center"/>' + bordAll + '</Style>'
+    + '<Style ss:ID="statutVert"><Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#2e7d52" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center" ss:Vertical="Center"/>' + bordAll + '</Style>'
+    + '<Style ss:ID="subTotal"><Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#1a3a5c"/><Interior ss:Color="#eef2f7" ss:Pattern="Solid"/><Alignment ss:Vertical="Center"/><Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#1a3a5c"/><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1a3a5c"/></Borders></Style>'
+    + '<Style ss:ID="subTotalNum"><Font ss:FontName="Arial" ss:Size="10" ss:Bold="1"/><Interior ss:Color="#eef2f7" ss:Pattern="Solid"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right" ss:Vertical="Center"/><Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#1a3a5c"/><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1a3a5c"/></Borders></Style>'
+    + '<Style ss:ID="subTotalGreen"><Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#2e7d52"/><Interior ss:Color="#eef2f7" ss:Pattern="Solid"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right" ss:Vertical="Center"/><Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#1a3a5c"/><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1a3a5c"/></Borders></Style>'
+    + '<Style ss:ID="subTotalRed"><Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#c0392b"/><Interior ss:Color="#eef2f7" ss:Pattern="Solid"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right" ss:Vertical="Center"/><Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#1a3a5c"/><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1a3a5c"/></Borders></Style>'
+    + '<Style ss:ID="grandTotal"><Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#1a3a5c" ss:Pattern="Solid"/><Alignment ss:Vertical="Center"/><Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#e8a020"/></Borders></Style>'
+    + '<Style ss:ID="grandTotalNum"><Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#f5c35a"/><Interior ss:Color="#1a3a5c" ss:Pattern="Solid"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right" ss:Vertical="Center"/><Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#e8a020"/></Borders></Style>'
+    + '<Style ss:ID="grandTotalGreen"><Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#6ee7b7"/><Interior ss:Color="#1a3a5c" ss:Pattern="Solid"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right" ss:Vertical="Center"/><Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#e8a020"/></Borders></Style>'
+    + '<Style ss:ID="grandTotalRed"><Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#fca5a5"/><Interior ss:Color="#1a3a5c" ss:Pattern="Solid"/><NumberFormat ss:Format="#,##0"/><Alignment ss:Horizontal="Right" ss:Vertical="Center"/><Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#e8a020"/></Borders></Style>'
     + '</Styles>'
     + '<Worksheet ss:Name="Impayés par classe">'
     + '<Table ss:DefaultColumnWidth="80">'
-    + '<Column ss:Width="25"/>'
-    + '<Column ss:Width="160"/>'
-    + '<Column ss:Width="90"/>'
-    + '<Column ss:Width="140"/>'
-    + '<Column ss:Width="110"/>'
-    + '<Column ss:Width="110"/>'
+    + '<Column ss:Width="30"/>'
     + '<Column ss:Width="110"/>'
     + '<Column ss:Width="110"/>'
     + '<Column ss:Width="90"/>'
+    + '<Column ss:Width="110"/>'
+    + '<Column ss:Width="150"/>'
+    + '<Column ss:Width="115"/>'
+    + '<Column ss:Width="100"/>'
+    + '<Column ss:Width="100"/>'
+    + '<Column ss:Width="100"/>'
+    + '<Column ss:Width="65"/>'
+    + '<Column ss:Width="80"/>'
     + xmlRows
     + '</Table>'
     + '<WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">'
     + '<FreezePanes/><FrozenNoSplit/><SplitHorizontal>3</SplitHorizontal><TopRowBottomPane>3</TopRowBottomPane>'
+    + '<Print><ValidPrinterInfo/><PaperSizeIndex>9</PaperSizeIndex><Landscape/><FitWidth>1</FitWidth><FitHeight>0</FitHeight></Print>'
     + '</WorksheetOptions>'
     + '</Worksheet>'
     + '</Workbook>';
